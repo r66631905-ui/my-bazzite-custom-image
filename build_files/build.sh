@@ -10,7 +10,7 @@ cp -avf "/ctx/system_files"/. /
 
 
 # ============================================================
-# BASIC BUILD / DOWNLOAD UTILITIES
+# BASIC UTILITIES
 # ============================================================
 
 dnf5 install -y \
@@ -42,11 +42,6 @@ dnf5 install -y \
 
 # ============================================================
 # VULKAN / GRAPHICS
-#
-# IMPORTANT:
-# Bazzite provides its own Mesa stack and excludes Fedora's
-# mesa-* packages. Do NOT try to install mesa-libEGL.i686
-# from Fedora.
 # ============================================================
 
 dnf5 install -y \
@@ -63,10 +58,10 @@ dnf5 install -y \
 
 
 # ============================================================
-# 32-BIT VULKAN / GAMING SUPPORT
+# 32-BIT VULKAN / GRAPHICS
 #
-# Do not explicitly install mesa-libEGL.i686 or mesa-libGL.i686.
-# Bazzite's multilib Mesa stack handles the required libraries.
+# Do NOT install Fedora mesa-libEGL.i686 / mesa-libGL.i686.
+# Bazzite manages its Mesa stack separately.
 # ============================================================
 
 dnf5 install -y \
@@ -78,7 +73,7 @@ dnf5 install -y \
 
 
 # ============================================================
-# X11 / WAYLAND
+# X11
 # ============================================================
 
 dnf5 install -y \
@@ -94,12 +89,13 @@ dnf5 install -y \
     libXtst \
     libxcb \
     libxkbcommon \
-    libxkbcommon-x11 \
-    wayland \
-    wayland-protocols
+    libxkbcommon-x11
 
 
-# 32-bit X11 libraries
+# ============================================================
+# 32-BIT X11
+# ============================================================
+
 dnf5 install -y \
     libX11.i686 \
     libXcursor.i686 \
@@ -142,7 +138,7 @@ dnf5 install -y \
 
 
 # ============================================================
-# GAMING PERFORMANCE
+# GAMING
 # ============================================================
 
 dnf5 install -y \
@@ -191,7 +187,7 @@ dnf5 install -y \
 
 
 # ============================================================
-# GAMING DIRECTORIES
+# STEAM COMPATIBILITY TOOLS DIRECTORY
 # ============================================================
 
 mkdir -p \
@@ -201,11 +197,6 @@ mkdir -p \
 
 # ============================================================
 # PROTON-CACHYOS
-#
-# Install the latest x86_64 SLR compatibility tool.
-#
-# Proton-CachyOS itself contains its Proton/Wine/DXVK/
-# VKD3D-Proton compatibility stack.
 # ============================================================
 
 echo
@@ -236,68 +227,41 @@ fi
 echo "Latest Proton-CachyOS release: $PROTON_TAG"
 
 
-# ------------------------------------------------------------
-# Find x86_64 Proton SLR archive.
-#
-# Prefer normal x86_64, not x86_64_v4.
-# ------------------------------------------------------------
+# ============================================================
+# FIND PROTON ARCHIVE
+# ============================================================
 
 PROTON_URL="$(
     printf '%s' "$PROTON_JSON" |
     jq -r '
         .assets[]
         | select(.name | test("x86_64"; "i"))
-        | select(.name | test("slr|steam.?linux.?runtime"; "i"))
+        | select(.name | test("x86_64_v4"; "i") | not)
+        | select(.name | test("arm64"; "i") | not)
         | select(.name | test("\\.(tar\\.xz|tar\\.gz|tar\\.zst)$"))
         | .browser_download_url
     ' |
     head -n 1
-)
-
-
-# ------------------------------------------------------------
-# Fallback: any x86_64 archive except v4/arm64.
-# ------------------------------------------------------------
+)"
 
 if [[ -z "$PROTON_URL" || "$PROTON_URL" == "null" ]]; then
-    PROTON_URL="$(
-        printf '%s' "$PROTON_JSON" |
-        jq -r '
-            .assets[]
-            | select(.name | test("x86_64"; "i"))
-            | select(.name | test("x86_64_v4"; "i") | not)
-            | select(.name | test("arm64"; "i") | not)
-            | select(.name | test("\\.(tar\\.xz|tar\\.gz|tar\\.zst)$"))
-            | .browser_download_url
-        ' |
-        head -n 1
-    )"
-fi
-
-
-if [[ -z "$PROTON_URL" || "$PROTON_URL" == "null" ]]; then
-    echo
     echo "ERROR: Proton-CachyOS archive was not found."
     echo
-    echo "Available release assets:"
+    echo "Available assets:"
     printf '%s' "$PROTON_JSON" |
         jq -r '.assets[].name'
-    echo
     exit 1
 fi
 
-echo
 echo "Proton archive:"
 echo "$PROTON_URL"
-echo
 
 
 # ============================================================
-# DOWNLOAD PROTON-CACHYOS
+# DOWNLOAD PROTON
 # ============================================================
 
 rm -rf /tmp/proton-cachyos
-
 mkdir -p /tmp/proton-cachyos
 
 curl -fL \
@@ -332,80 +296,46 @@ case "$PROTON_URL" in
         ;;
 
     *)
-        echo "ERROR: Unsupported Proton archive format."
+        echo "ERROR: Unsupported Proton archive."
         exit 1
         ;;
 
 esac
 
-
 rm -rf /tmp/proton-cachyos
 
 
 # ============================================================
-# VERIFY PROTON
-# ============================================================
-
-echo
-echo "============================================================"
-echo " Proton compatibility tools installed:"
-echo "============================================================"
-
-find /usr/share/steam/compatibilitytools.d \
-    -maxdepth 3 \
-    -type f \
-    \( \
-        -name "proton" \
-        -o \
-        -name "compatibilitytool.vdf" \
-    \) \
-    -print || true
-
-
-# ============================================================
-# WINE / PROTON ENVIRONMENT
+# GAMING ENVIRONMENT
 # ============================================================
 
 cat > /etc/profile.d/gaming.sh <<'EOF'
-# ------------------------------------------------------------
-# Wine
-# ------------------------------------------------------------
 
+# Wine
 export WINEDEBUG="${WINEDEBUG:--all}"
 
-# ------------------------------------------------------------
 # Esync / Fsync
-# ------------------------------------------------------------
-
 export WINEESYNC="${WINEESYNC:-1}"
 export WINEFSYNC="${WINEFSYNC:-1}"
 
-# ------------------------------------------------------------
 # DXVK
-# ------------------------------------------------------------
-
 export DXVK_LOG_LEVEL="${DXVK_LOG_LEVEL:-none}"
 
-# ------------------------------------------------------------
-# Shader caches
-# ------------------------------------------------------------
-
+# Shader cache
 export DXVK_STATE_CACHE_PATH="${DXVK_STATE_CACHE_PATH:-$HOME/.cache/dxvk}"
 
 export VKD3D_SHADER_CACHE_PATH="${VKD3D_SHADER_CACHE_PATH:-$HOME/.cache/vkd3d-proton}"
 
-# ------------------------------------------------------------
 # Steam compatibility tools
-# ------------------------------------------------------------
-
 export STEAM_COMPAT_TOOLS_PATHS="${STEAM_COMPAT_TOOLS_PATHS:-/usr/share/steam/compatibilitytools.d}"
+
 EOF
 
 chmod 0644 /etc/profile.d/gaming.sh
 
 
 # ============================================================
-# GAMEMODE CONFIGURATION
+# GAMEMODE
 # ============================================================
 
 cat > /etc/gamemode.ini <<'EOF'
@@ -417,7 +347,7 @@ EOF
 
 
 # ============================================================
-# MANGOHUD CONFIGURATION
+# MANGOHUD
 # ============================================================
 
 cat > /etc/mangohud.conf <<'EOF'
@@ -454,7 +384,7 @@ rm -rf /tmp/*
 
 
 # ============================================================
-# BUILD COMPLETE
+# COMPLETE
 # ============================================================
 
 echo
@@ -462,22 +392,23 @@ echo "============================================================"
 echo " BAZZITE GAMING IMAGE BUILD COMPLETE"
 echo "============================================================"
 echo
-echo "Gaming stack:"
+echo "Installed gaming components:"
 echo
 echo "  Wine"
 echo "  Winetricks"
 echo "  Proton-CachyOS"
-echo "  DXVK / VKD3D-Proton via Proton"
 echo "  Vulkan"
 echo "  Vulkan 32-bit"
 echo "  Mesa"
 echo "  Mesa 32-bit"
+echo "  X11"
+echo "  X11 32-bit"
 echo "  Gamescope"
 echo "  MangoHud"
 echo "  GameMode"
 echo "  PipeWire"
 echo "  FFmpeg / GStreamer"
 echo "  SDL2"
-echo "  32-bit Windows gaming libraries"
+echo "  Windows compatibility libraries"
 echo
 echo "============================================================"
