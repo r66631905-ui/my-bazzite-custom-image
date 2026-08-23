@@ -43,8 +43,7 @@ dnf5 install -y \
 # ============================================================
 # VULKAN TOOLS
 #
-# Bazzite already provides the actual Mesa/Vulkan stack.
-# We only add tools that are useful for diagnostics.
+# Bazzite already provides the graphics/Mesa stack.
 # ============================================================
 
 dnf5 install -y \
@@ -53,27 +52,7 @@ dnf5 install -y \
 
 
 # ============================================================
-# GAMING RUNTIME
-#
-# Bazzite already ships these through Terra:
-#
-#   terra-gamescope
-#   terra-gamescope-libs
-#   umu-wrapper
-#   umu-launcher
-#   libFAudio
-#   MangoHud
-#   vkBasalt
-#
-# DO NOT install Fedora gamescope/Mesa/libcurl here.
-# ============================================================
-
-
-# ============================================================
 # AUDIO
-#
-# Only install packages that are safe/needed for Wine.
-# Bazzite already has PipeWire.
 # ============================================================
 
 dnf5 install -y \
@@ -118,11 +97,16 @@ dnf5 install -y \
 
 
 # ============================================================
-# BASIC RUNTIME LIBRARIES
+# COMMON RUNTIME LIBRARIES
 #
 # IMPORTANT:
-# Do NOT install libcurl.
-# Bazzite uses libcurl-minimal.
+# Do NOT install:
+#   libcurl
+#   Mesa packages
+#   Fedora Gamescope
+#   Wayland packages
+#
+# Bazzite already provides the required stack.
 # ============================================================
 
 dnf5 install -y \
@@ -137,12 +121,10 @@ dnf5 install -y \
 
 
 # ============================================================
-# STEAM COMPATIBILITY TOOLS
+# STEAM COMPATIBILITY TOOLS DIRECTORY
 # ============================================================
 
-mkdir -p \
-    /usr/share/steam/compatibilitytools.d \
-    /usr/local/share/gaming
+mkdir -p /usr/share/steam/compatibilitytools.d
 
 
 # ============================================================
@@ -178,10 +160,7 @@ echo "Latest Proton-CachyOS: $PROTON_TAG"
 
 
 # ============================================================
-# FIND NORMAL X86_64 PROTON
-#
-# CachyOS recommends normal x86_64 for conservative use.
-# x86_64_v4 is experimental.
+# FIND X86_64 PROTON ARCHIVE
 # ============================================================
 
 PROTON_URL="$(
@@ -199,20 +178,22 @@ PROTON_URL="$(
 
 if [[ -z "$PROTON_URL" || "$PROTON_URL" == "null" ]]; then
     echo
-    echo "ERROR: Could not find Proton-CachyOS x86_64 archive."
+    echo "ERROR: Proton-CachyOS x86_64 archive was not found."
     echo
-    echo "Available assets:"
+    echo "Available release assets:"
     printf '%s' "$PROTON_JSON" |
         jq -r '.assets[].name'
     exit 1
 fi
 
-echo "Proton download:"
+echo
+echo "Proton archive:"
 echo "$PROTON_URL"
+echo
 
 
 # ============================================================
-# DOWNLOAD
+# DOWNLOAD PROTON
 # ============================================================
 
 rm -rf /tmp/proton-cachyos
@@ -227,7 +208,7 @@ curl -fL \
 
 
 # ============================================================
-# EXTRACT
+# EXTRACT PROTON
 # ============================================================
 
 case "$PROTON_URL" in
@@ -251,7 +232,7 @@ case "$PROTON_URL" in
         ;;
 
     *)
-        echo "ERROR: Unsupported Proton archive."
+        echo "ERROR: Unsupported Proton archive format."
         exit 1
         ;;
 
@@ -286,41 +267,21 @@ find /usr/share/steam/compatibilitytools.d \
 
 cat > /etc/profile.d/gaming.sh <<'EOF'
 
-# ============================================================
-# WINE
-# ============================================================
-
+# Wine
 export WINEDEBUG="${WINEDEBUG:--all}"
 
-
-# ============================================================
-# ESYNC / FSYNC
-# ============================================================
-
+# Esync / Fsync
 export WINEESYNC="${WINEESYNC:-1}"
 export WINEFSYNC="${WINEFSYNC:-1}"
 
-
-# ============================================================
 # DXVK
-# ============================================================
-
 export DXVK_LOG_LEVEL="${DXVK_LOG_LEVEL:-none}"
-
 export DXVK_STATE_CACHE_PATH="${DXVK_STATE_CACHE_PATH:-$HOME/.cache/dxvk}"
 
-
-# ============================================================
-# VKD3D-PROTON
-# ============================================================
-
+# VKD3D-Proton
 export VKD3D_SHADER_CACHE_PATH="${VKD3D_SHADER_CACHE_PATH:-$HOME/.cache/vkd3d-proton}"
 
-
-# ============================================================
-# STEAM COMPATIBILITY TOOLS
-# ============================================================
-
+# Steam compatibility tools
 export STEAM_COMPAT_TOOLS_PATHS="${STEAM_COMPAT_TOOLS_PATHS:-/usr/share/steam/compatibilitytools.d}"
 
 EOF
@@ -378,7 +339,7 @@ rm -rf /tmp/*
 
 
 # ============================================================
-# FINAL
+# BUILD COMPLETE
 # ============================================================
 
 echo
@@ -386,12 +347,11 @@ echo "============================================================"
 echo " BAZZITE CUSTOM GAMING IMAGE BUILD COMPLETE"
 echo "============================================================"
 echo
-echo "Windows / Gaming:"
+echo "Installed/customized:"
 echo
 echo "  Wine"
 echo "  Winetricks"
 echo "  Proton-CachyOS"
-echo "  DXVK / VKD3D-Proton through Proton"
 echo "  Vulkan tools"
 echo "  Vulkan validation"
 echo "  Bazzite Gamescope"
@@ -400,10 +360,9 @@ echo "  MangoHud"
 echo "  vkBasalt"
 echo "  GameMode"
 echo "  PipeWire"
-echo "  FFmpeg"
-echo "  GStreamer"
+echo "  FFmpeg / GStreamer"
 echo "  SDL2"
 echo "  Controller support"
-echo "  32-bit Bazzite gaming libraries"
+echo "  Bazzite 32-bit gaming stack"
 echo
 echo "============================================================"
