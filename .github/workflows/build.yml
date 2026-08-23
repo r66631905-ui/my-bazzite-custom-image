@@ -1,17 +1,127 @@
-      - name: Push To GHCR
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-        id: push-image
-        env:
-          ALIAS_TAGS: ${{ steps.gen-build-tags.outputs.alias_tags }}
+name: Build container image
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/README.md'
+
+  schedule:
+    - cron: '05 10 * * *'
+
+  workflow_dispatch:
+
+env:
+  IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+
+jobs:
+  build_push:
+
+    name: Build and push image
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      packages: write
+
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      - name: Maximize build space
+        uses: ublue-os/remove-unwanted-software@main
+
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+
+      - name: Check Just Syntax
         run: |
-          set -euox pipefail
-          for tag in ${ALIAS_TAGS}; do
-            podman push --digestfile=/tmp/digestfile ${IMAGE_NAME}:${tag} ${IMAGE_REGISTRY}/${IMAGE_NAME}:${tag}
+          just check
+
+
+      - name: Get Image Name
+        run: |
+          echo "IMAGE_NAME=$(just image_name)" >> $GITHUB_ENV
+
+
+      - name: Get Default Tag
+        run: |
+          echo "DEFAULT_TAG=$(just generate-default-tag)" >> $GITHUB_ENV
+
+
+      - name: Prepare environment
+        run: |
+          echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> $GITHUB_ENV
+          echo "IMAGE_NAME=${IMAGE_NAME,,}" >> $GITHUB_ENV
+
+
+      - name: Build Image
+        run: |
+          just build \
+          ${IMAGE_NAME} \
+          ${DEFAULT_TAG}
+
+
+      - name: Rechunk with rpm-ostree
+        run: |
+          just ostree-rechunk \
+          ${IMAGE_NAME} \
+          ${DEFAULT_TAG}
+
+
+      - name: Generate Build Tags
+        id: tags
+        run: |
+          TAGS=$(just generate-build-tags \
+          ${IMAGE_NAME} \
+          ${DEFAULT_TAG})
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+
+
+      - name: Tag Image
+        run: |
+          just tag-images \
+          "${IMAGE_NAME}" \
+          "${DEFAULT_TAG}" \
+          "${{ steps.tags.outputs.tags }}"
+
+
+      - name: Login GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+
+      - name: Push Image
+        if: github.event_name != 'pull_request'
+        run: |
+
+          set -eux
+
+          for tag in ${{ steps.tags.outputs.tags }}
+          do
+
+          podman push \
+          ${IMAGE_NAME}:${tag} \
+          ${IMAGE_REGISTRY}/${IMAGE_NAME}:${tag}
+
           done
-
-          digest=$(< /tmp/digestfile)
-
-          echo "digest=${digest}" >> $GITHUB_OUTPUT
-
-      # Image signing disabled
-      # Add cosign later if you want signed images
