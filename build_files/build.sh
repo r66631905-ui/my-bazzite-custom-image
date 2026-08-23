@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ouex pipefail
+set -euo pipefail
 
 # ============================================================
 # COPY SYSTEM FILES
@@ -37,16 +37,11 @@ dnf5 install -y \
 
 dnf5 install -y \
     wine \
-    wine-core \
-    wine-common \
-    wine-desktop \
-    wine-mono \
-    wine-gecko \
     winetricks
 
 
 # ============================================================
-# VULKAN
+# VULKAN / MESA
 # ============================================================
 
 dnf5 install -y \
@@ -54,29 +49,18 @@ dnf5 install -y \
     vulkan-tools \
     vulkan-validation-layers \
     mesa-vulkan-drivers \
-    mesa-dri-drivers
-
-
-# 32-bit Vulkan / Mesa
-dnf5 install -y \
-    vulkan-loader.i686 \
-    mesa-vulkan-drivers.i686 \
-    mesa-dri-drivers.i686
-
-
-# ============================================================
-# OPENGL / GRAPHICS
-# ============================================================
-
-dnf5 install -y \
+    mesa-dri-drivers \
     mesa-libGLU \
     mesa-libgbm \
     libglvnd \
     libglvnd-glx \
     libglvnd-egl
 
-
+# 32-bit graphics stack
 dnf5 install -y \
+    vulkan-loader.i686 \
+    mesa-vulkan-drivers.i686 \
+    mesa-dri-drivers.i686 \
     libglvnd.i686 \
     libglvnd-glx.i686 \
     libglvnd-egl.i686
@@ -103,8 +87,6 @@ dnf5 install -y \
     wayland \
     wayland-protocols
 
-
-# 32-bit X11
 dnf5 install -y \
     libX11.i686 \
     libXcursor.i686 \
@@ -147,7 +129,7 @@ dnf5 install -y \
 
 
 # ============================================================
-# GAMING / PERFORMANCE
+# GAMING PERFORMANCE
 # ============================================================
 
 dnf5 install -y \
@@ -180,7 +162,7 @@ dnf5 install -y \
 
 
 # ============================================================
-# COMMON RUNTIME LIBRARIES
+# COMMON LIBRARIES
 # ============================================================
 
 dnf5 install -y \
@@ -189,17 +171,7 @@ dnf5 install -y \
     libgcc \
     zlib \
     freetype \
-    fontconfig
-
-
-# ============================================================
-# STEAM GAMING SUPPORT
-# ============================================================
-
-# Bazzite already contains Steam in normal desktop images.
-# Install these extra runtime libraries for Windows games.
-
-dnf5 install -y \
+    fontconfig \
     libcurl \
     openssl \
     ca-certificates
@@ -211,8 +183,6 @@ dnf5 install -y \
 
 mkdir -p \
     /usr/share/steam/compatibilitytools.d \
-    /usr/local/share/dxvk \
-    /usr/local/share/vkd3d-proton \
     /usr/local/share/gaming
 
 
@@ -220,186 +190,129 @@ mkdir -p \
 # PROTON-CACHYOS
 # ============================================================
 
+echo
 echo "============================================================"
-echo "Installing Proton-CachyOS"
+echo " Installing latest stable Proton-CachyOS"
 echo "============================================================"
 
 PROTON_API="https://api.github.com/repos/CachyOS/proton-cachyos/releases/latest"
 
-PROTON_JSON="$(curl -fsSL \
-    -H "Accept: application/vnd.github+json" \
-    "$PROTON_API")"
+PROTON_JSON="$(
+    curl -fsSL \
+        --retry 5 \
+        --retry-all-errors \
+        -H "Accept: application/vnd.github+json" \
+        "$PROTON_API"
+)"
 
 PROTON_TAG="$(printf '%s' "$PROTON_JSON" | jq -r '.tag_name')"
 
-echo "Proton-CachyOS version: $PROTON_TAG"
+if [[ -z "$PROTON_TAG" || "$PROTON_TAG" == "null" ]]; then
+    echo "ERROR: Could not determine Proton-CachyOS release."
+    exit 1
+fi
 
+echo "Proton-CachyOS release: $PROTON_TAG"
+
+# Prefer the normal x86_64 SLR build.
 PROTON_URL="$(
     printf '%s' "$PROTON_JSON" |
     jq -r '
         .assets[]
-        | select(
-            (.name | test("\\.tar\\.xz$|\\.tar\\.gz$|\\.tar\\.zst$"))
-            and
-            (.name | test("x86_64|amd64"; "i"))
-        )
+        | select(.name | test("x86_64"; "i"))
+        | select(.name | test("slr"; "i"))
+        | select(.name | test("\\.(tar\\.xz|tar\\.gz|tar\\.zst)$"))
         | .browser_download_url
     ' |
     head -n 1
 )"
 
-if [ -n "$PROTON_URL" ] && [ "$PROTON_URL" != "null" ]; then
-
-    mkdir -p /tmp/proton-cachyos
-
-    curl -fL \
-        --retry 5 \
-        --retry-all-errors \
-        "$PROTON_URL" \
-        -o /tmp/proton-cachyos/proton.tar
-
-    case "$PROTON_URL" in
-
-        *.tar.xz)
-            tar -xJf \
-                /tmp/proton-cachyos/proton.tar \
-                -C /usr/share/steam/compatibilitytools.d
-            ;;
-
-        *.tar.gz)
-            tar -xzf \
-                /tmp/proton-cachyos/proton.tar \
-                -C /usr/share/steam/compatibilitytools.d
-            ;;
-
-        *.tar.zst)
-            tar --zstd -xf \
-                /tmp/proton-cachyos/proton.tar \
-                -C /usr/share/steam/compatibilitytools.d
-            ;;
-
-    esac
-
-    rm -rf /tmp/proton-cachyos
-
-else
-    echo "WARNING: Proton-CachyOS archive was not found."
+if [[ -z "$PROTON_URL" || "$PROTON_URL" == "null" ]]; then
+    echo "ERROR: Could not find x86_64 SLR Proton-CachyOS archive."
+    echo "Available assets:"
+    printf '%s' "$PROTON_JSON" | jq -r '.assets[].name'
+    exit 1
 fi
+
+echo "Downloading:"
+echo "$PROTON_URL"
+
+mkdir -p /tmp/proton-cachyos
+
+curl -fL \
+    --retry 5 \
+    --retry-all-errors \
+    "$PROTON_URL" \
+    -o /tmp/proton-cachyos/proton.tar
+
+case "$PROTON_URL" in
+    *.tar.xz)
+        tar -xJf \
+            /tmp/proton-cachyos/proton.tar \
+            -C /usr/share/steam/compatibilitytools.d
+        ;;
+    *.tar.gz)
+        tar -xzf \
+            /tmp/proton-cachyos/proton.tar \
+            -C /usr/share/steam/compatibilitytools.d
+        ;;
+    *.tar.zst)
+        tar --zstd -xf \
+            /tmp/proton-cachyos/proton.tar \
+            -C /usr/share/steam/compatibilitytools.d
+        ;;
+    *)
+        echo "ERROR: Unsupported Proton archive format."
+        exit 1
+        ;;
+esac
+
+rm -rf /tmp/proton-cachyos
 
 
 # ============================================================
+# VERIFY PROTON INSTALLATION
+# ============================================================
+
+echo
+echo "Installed compatibility tools:"
+
+find /usr/share/steam/compatibilitytools.d \
+    -maxdepth 2 \
+    -type f \
+    \( -name "proton" -o -name "compatibilitytool.vdf" \) \
+    -print || true
+
+
+# ============================================================
+# GAMING ENVIRONMENT
+# ============================================================
+
+cat > /etc/profile.d/gaming.sh <<'EOF'
+# Wine
+export WINEDEBUG="${WINEDEBUG:--all}"
+
+# Esync/Fsync
+export WINEESYNC="${WINEESYNC:-1}"
+export WINEFSYNC="${WINEFSYNC:-1}"
+
 # DXVK
-# ============================================================
+export DXVK_LOG_LEVEL="${DXVK_LOG_LEVEL:-none}"
 
-echo "============================================================"
-echo "Installing latest DXVK"
-echo "============================================================"
+# Shader caches
+export DXVK_STATE_CACHE_PATH="${DXVK_STATE_CACHE_PATH:-$HOME/.cache/dxvk}"
+export VKD3D_SHADER_CACHE_PATH="${VKD3D_SHADER_CACHE_PATH:-$HOME/.cache/vkd3d-proton}"
 
-DXVK_API="https://api.github.com/repos/doitsujin/dxvk/releases/latest"
+# Steam compatibility tools
+export STEAM_COMPAT_TOOLS_PATHS="${STEAM_COMPAT_TOOLS_PATHS:-/usr/share/steam/compatibilitytools.d}"
+EOF
 
-DXVK_JSON="$(curl -fsSL \
-    -H "Accept: application/vnd.github+json" \
-    "$DXVK_API")"
-
-DXVK_URL="$(
-    printf '%s' "$DXVK_JSON" |
-    jq -r '
-        .assets[]
-        | select(.name | test("^dxvk-.*\\.tar\\.gz$"))
-        | .browser_download_url
-    ' |
-    head -n 1
-)"
-
-if [ -n "$DXVK_URL" ] && [ "$DXVK_URL" != "null" ]; then
-
-    mkdir -p /tmp/dxvk
-
-    curl -fL \
-        --retry 5 \
-        --retry-all-errors \
-        "$DXVK_URL" \
-        -o /tmp/dxvk/dxvk.tar.gz
-
-    tar -xzf \
-        /tmp/dxvk/dxvk.tar.gz \
-        -C /usr/local/share/dxvk \
-        --strip-components=1
-
-    rm -rf /tmp/dxvk
-
-fi
+chmod 0644 /etc/profile.d/gaming.sh
 
 
 # ============================================================
-# VKD3D-PROTON
+# GAMEMODE
 # ============================================================
-
-echo "============================================================"
-echo "Installing latest VKD3D-Proton"
-echo "============================================================"
-
-VKD3D_API="https://api.github.com/repos/HansKristian-Work/vkd3d-proton/releases/latest"
-
-VKD3D_JSON="$(curl -fsSL \
-    -H "Accept: application/vnd.github+json" \
-    "$VKD3D_API")"
-
-VKD3D_URL="$(
-    printf '%s' "$VKD3D_JSON" |
-    jq -r '
-        .assets[]
-        | select(.name | test("\\.tar\\.zst$|\\.tar\\.xz$|\\.tar\\.gz$"))
-        | .browser_download_url
-    ' |
-    head -n 1
-)"
-
-if [ -n "$VKD3D_URL" ] && [ "$VKD3D_URL" != "null" ]; then
-
-    mkdir -p /tmp/vkd3d
-
-    curl -fL \
-        --retry 5 \
-        --retry-all-errors \
-        "$VKD3D_URL" \
-        -o /tmp/vkd3d/vkd3d.tar
-
-    case "$VKD3D_URL" in
-
-        *.tar.zst)
-            tar --zstd -xf \
-                /tmp/vkd3d/vkd3d.tar \
-                -C /usr/local/share/vkd3d-proton \
-                --strip-components=1
-            ;;
-
-        *.tar.xz)
-            tar -xJf \
-                /tmp/vkd3d/vkd3d.tar \
-                -C /usr/local/share/vkd3d-proton \
-                --strip-components=1
-            ;;
-
-        *.tar.gz)
-            tar -xzf \
-                /tmp/vkd3d/vkd3d.tar \
-                -C /usr/local/share/vkd3d-proton \
-                --strip-components=1
-            ;;
-
-    esac
-
-    rm -rf /tmp/vkd3d
-
-fi
-
-
-# ============================================================
-# GAMEMODE CONFIG
-# ============================================================
-
-mkdir -p /etc
 
 cat > /etc/gamemode.ini <<'EOF'
 [general]
@@ -410,7 +323,7 @@ EOF
 
 
 # ============================================================
-# MANGOHUD CONFIG
+# MANGOHUD
 # ============================================================
 
 cat > /etc/mangohud.conf <<'EOF'
@@ -429,29 +342,7 @@ EOF
 
 
 # ============================================================
-# WINE / PROTON ENVIRONMENT
-# ============================================================
-
-cat > /etc/profile.d/gaming.sh <<'EOF'
-export WINEDEBUG="${WINEDEBUG:--all}"
-
-export WINEESYNC="${WINEESYNC:-1}"
-export WINEFSYNC="${WINEFSYNC:-1}"
-
-export DXVK_LOG_LEVEL="${DXVK_LOG_LEVEL:-none}"
-
-export DXVK_STATE_CACHE_PATH="${DXVK_STATE_CACHE_PATH:-$HOME/.cache/dxvk}"
-
-export VKD3D_SHADER_CACHE_PATH="${VKD3D_SHADER_CACHE_PATH:-$HOME/.cache/vkd3d-proton}"
-
-export STEAM_COMPAT_TOOLS_PATHS="${STEAM_COMPAT_TOOLS_PATHS:-/usr/share/steam/compatibilitytools.d}"
-EOF
-
-chmod 0644 /etc/profile.d/gaming.sh
-
-
-# ============================================================
-# ENABLE SYSTEM SERVICES
+# PODMAN
 # ============================================================
 
 systemctl enable podman.socket
@@ -469,7 +360,7 @@ rm -rf /tmp/*
 
 
 # ============================================================
-# BUILD COMPLETE
+# FINAL
 # ============================================================
 
 echo
@@ -477,21 +368,22 @@ echo "============================================================"
 echo " BAZZITE GAMING IMAGE BUILD COMPLETE"
 echo "============================================================"
 echo
-echo "Gaming components:"
+echo "Installed gaming stack:"
+echo
 echo "  Wine"
 echo "  Winetricks"
 echo "  Proton-CachyOS"
-echo "  DXVK"
-echo "  VKD3D-Proton"
-echo "  Vulkan 64-bit"
+echo "  Vulkan"
 echo "  Vulkan 32-bit"
 echo "  Mesa"
+echo "  Mesa 32-bit"
 echo "  Gamescope"
 echo "  MangoHud"
 echo "  GameMode"
 echo "  PipeWire"
-echo "  FFmpeg/GStreamer"
+echo "  FFmpeg / GStreamer"
 echo "  SDL2"
+echo "  32-bit graphics libraries"
 echo "  Windows compatibility libraries"
 echo
 echo "============================================================"
