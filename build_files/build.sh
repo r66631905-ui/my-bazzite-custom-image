@@ -10,7 +10,7 @@ cp -avf "/ctx/system_files"/. /
 
 
 # ============================================================
-# BASIC UTILITIES
+# BASIC BUILD / DOWNLOAD UTILITIES
 # ============================================================
 
 dnf5 install -y \
@@ -41,7 +41,12 @@ dnf5 install -y \
 
 
 # ============================================================
-# VULKAN / MESA
+# VULKAN / GRAPHICS
+#
+# IMPORTANT:
+# Bazzite provides its own Mesa stack and excludes Fedora's
+# mesa-* packages. Do NOT try to install mesa-libEGL.i686
+# from Fedora.
 # ============================================================
 
 dnf5 install -y \
@@ -56,14 +61,20 @@ dnf5 install -y \
     libglvnd-glx \
     libglvnd-egl
 
-# 32-bit graphics stack
+
+# ============================================================
+# 32-BIT VULKAN / GAMING SUPPORT
+#
+# Do not explicitly install mesa-libEGL.i686 or mesa-libGL.i686.
+# Bazzite's multilib Mesa stack handles the required libraries.
+# ============================================================
+
 dnf5 install -y \
     vulkan-loader.i686 \
     mesa-vulkan-drivers.i686 \
     mesa-dri-drivers.i686 \
     libglvnd.i686 \
-    libglvnd-glx.i686 \
-    libglvnd-egl.i686
+    libglvnd-glx.i686
 
 
 # ============================================================
@@ -87,6 +98,8 @@ dnf5 install -y \
     wayland \
     wayland-protocols
 
+
+# 32-bit X11 libraries
 dnf5 install -y \
     libX11.i686 \
     libXcursor.i686 \
@@ -162,7 +175,7 @@ dnf5 install -y \
 
 
 # ============================================================
-# COMMON LIBRARIES
+# COMMON RUNTIME LIBRARIES
 # ============================================================
 
 dnf5 install -y \
@@ -188,11 +201,16 @@ mkdir -p \
 
 # ============================================================
 # PROTON-CACHYOS
+#
+# Install the latest x86_64 SLR compatibility tool.
+#
+# Proton-CachyOS itself contains its Proton/Wine/DXVK/
+# VKD3D-Proton compatibility stack.
 # ============================================================
 
 echo
 echo "============================================================"
-echo " Installing latest stable Proton-CachyOS"
+echo " Installing Proton-CachyOS"
 echo "============================================================"
 
 PROTON_API="https://api.github.com/repos/CachyOS/proton-cachyos/releases/latest"
@@ -205,37 +223,80 @@ PROTON_JSON="$(
         "$PROTON_API"
 )"
 
-PROTON_TAG="$(printf '%s' "$PROTON_JSON" | jq -r '.tag_name')"
+PROTON_TAG="$(
+    printf '%s' "$PROTON_JSON" |
+    jq -r '.tag_name'
+)"
 
 if [[ -z "$PROTON_TAG" || "$PROTON_TAG" == "null" ]]; then
     echo "ERROR: Could not determine Proton-CachyOS release."
     exit 1
 fi
 
-echo "Proton-CachyOS release: $PROTON_TAG"
+echo "Latest Proton-CachyOS release: $PROTON_TAG"
 
-# Prefer the normal x86_64 SLR build.
+
+# ------------------------------------------------------------
+# Find x86_64 Proton SLR archive.
+#
+# Prefer normal x86_64, not x86_64_v4.
+# ------------------------------------------------------------
+
 PROTON_URL="$(
     printf '%s' "$PROTON_JSON" |
     jq -r '
         .assets[]
         | select(.name | test("x86_64"; "i"))
-        | select(.name | test("slr"; "i"))
+        | select(.name | test("slr|steam.?linux.?runtime"; "i"))
         | select(.name | test("\\.(tar\\.xz|tar\\.gz|tar\\.zst)$"))
         | .browser_download_url
     ' |
     head -n 1
-)"
+)
+
+
+# ------------------------------------------------------------
+# Fallback: any x86_64 archive except v4/arm64.
+# ------------------------------------------------------------
 
 if [[ -z "$PROTON_URL" || "$PROTON_URL" == "null" ]]; then
-    echo "ERROR: Could not find x86_64 SLR Proton-CachyOS archive."
-    echo "Available assets:"
-    printf '%s' "$PROTON_JSON" | jq -r '.assets[].name'
+    PROTON_URL="$(
+        printf '%s' "$PROTON_JSON" |
+        jq -r '
+            .assets[]
+            | select(.name | test("x86_64"; "i"))
+            | select(.name | test("x86_64_v4"; "i") | not)
+            | select(.name | test("arm64"; "i") | not)
+            | select(.name | test("\\.(tar\\.xz|tar\\.gz|tar\\.zst)$"))
+            | .browser_download_url
+        ' |
+        head -n 1
+    )"
+fi
+
+
+if [[ -z "$PROTON_URL" || "$PROTON_URL" == "null" ]]; then
+    echo
+    echo "ERROR: Proton-CachyOS archive was not found."
+    echo
+    echo "Available release assets:"
+    printf '%s' "$PROTON_JSON" |
+        jq -r '.assets[].name'
+    echo
     exit 1
 fi
 
-echo "Downloading:"
+echo
+echo "Proton archive:"
 echo "$PROTON_URL"
+echo
+
+
+# ============================================================
+# DOWNLOAD PROTON-CACHYOS
+# ============================================================
+
+rm -rf /tmp/proton-cachyos
 
 mkdir -p /tmp/proton-cachyos
 
@@ -245,65 +306,98 @@ curl -fL \
     "$PROTON_URL" \
     -o /tmp/proton-cachyos/proton.tar
 
+
+# ============================================================
+# EXTRACT PROTON
+# ============================================================
+
 case "$PROTON_URL" in
+
     *.tar.xz)
         tar -xJf \
             /tmp/proton-cachyos/proton.tar \
             -C /usr/share/steam/compatibilitytools.d
         ;;
+
     *.tar.gz)
         tar -xzf \
             /tmp/proton-cachyos/proton.tar \
             -C /usr/share/steam/compatibilitytools.d
         ;;
+
     *.tar.zst)
         tar --zstd -xf \
             /tmp/proton-cachyos/proton.tar \
             -C /usr/share/steam/compatibilitytools.d
         ;;
+
     *)
         echo "ERROR: Unsupported Proton archive format."
         exit 1
         ;;
+
 esac
+
 
 rm -rf /tmp/proton-cachyos
 
 
 # ============================================================
-# VERIFY PROTON INSTALLATION
+# VERIFY PROTON
 # ============================================================
 
 echo
-echo "Installed compatibility tools:"
+echo "============================================================"
+echo " Proton compatibility tools installed:"
+echo "============================================================"
 
 find /usr/share/steam/compatibilitytools.d \
-    -maxdepth 2 \
+    -maxdepth 3 \
     -type f \
-    \( -name "proton" -o -name "compatibilitytool.vdf" \) \
+    \( \
+        -name "proton" \
+        -o \
+        -name "compatibilitytool.vdf" \
+    \) \
     -print || true
 
 
 # ============================================================
-# GAMING ENVIRONMENT
+# WINE / PROTON ENVIRONMENT
 # ============================================================
 
 cat > /etc/profile.d/gaming.sh <<'EOF'
+# ------------------------------------------------------------
 # Wine
+# ------------------------------------------------------------
+
 export WINEDEBUG="${WINEDEBUG:--all}"
 
-# Esync/Fsync
+# ------------------------------------------------------------
+# Esync / Fsync
+# ------------------------------------------------------------
+
 export WINEESYNC="${WINEESYNC:-1}"
 export WINEFSYNC="${WINEFSYNC:-1}"
 
+# ------------------------------------------------------------
 # DXVK
+# ------------------------------------------------------------
+
 export DXVK_LOG_LEVEL="${DXVK_LOG_LEVEL:-none}"
 
+# ------------------------------------------------------------
 # Shader caches
+# ------------------------------------------------------------
+
 export DXVK_STATE_CACHE_PATH="${DXVK_STATE_CACHE_PATH:-$HOME/.cache/dxvk}"
+
 export VKD3D_SHADER_CACHE_PATH="${VKD3D_SHADER_CACHE_PATH:-$HOME/.cache/vkd3d-proton}"
 
+# ------------------------------------------------------------
 # Steam compatibility tools
+# ------------------------------------------------------------
+
 export STEAM_COMPAT_TOOLS_PATHS="${STEAM_COMPAT_TOOLS_PATHS:-/usr/share/steam/compatibilitytools.d}"
 EOF
 
@@ -311,7 +405,7 @@ chmod 0644 /etc/profile.d/gaming.sh
 
 
 # ============================================================
-# GAMEMODE
+# GAMEMODE CONFIGURATION
 # ============================================================
 
 cat > /etc/gamemode.ini <<'EOF'
@@ -323,7 +417,7 @@ EOF
 
 
 # ============================================================
-# MANGOHUD
+# MANGOHUD CONFIGURATION
 # ============================================================
 
 cat > /etc/mangohud.conf <<'EOF'
@@ -360,7 +454,7 @@ rm -rf /tmp/*
 
 
 # ============================================================
-# FINAL
+# BUILD COMPLETE
 # ============================================================
 
 echo
@@ -368,11 +462,12 @@ echo "============================================================"
 echo " BAZZITE GAMING IMAGE BUILD COMPLETE"
 echo "============================================================"
 echo
-echo "Installed gaming stack:"
+echo "Gaming stack:"
 echo
 echo "  Wine"
 echo "  Winetricks"
 echo "  Proton-CachyOS"
+echo "  DXVK / VKD3D-Proton via Proton"
 echo "  Vulkan"
 echo "  Vulkan 32-bit"
 echo "  Mesa"
@@ -383,7 +478,6 @@ echo "  GameMode"
 echo "  PipeWire"
 echo "  FFmpeg / GStreamer"
 echo "  SDL2"
-echo "  32-bit graphics libraries"
-echo "  Windows compatibility libraries"
+echo "  32-bit Windows gaming libraries"
 echo
 echo "============================================================"
