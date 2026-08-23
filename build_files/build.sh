@@ -42,6 +42,9 @@ dnf5 install -y \
 
 # ============================================================
 # VULKAN / GRAPHICS
+#
+# Bazzite already provides its Mesa stack.
+# Do not replace Bazzite's Mesa packages with Fedora packages.
 # ============================================================
 
 dnf5 install -y \
@@ -59,9 +62,6 @@ dnf5 install -y \
 
 # ============================================================
 # 32-BIT VULKAN / GRAPHICS
-#
-# Do NOT install Fedora mesa-libEGL.i686 / mesa-libGL.i686.
-# Bazzite manages its Mesa stack separately.
 # ============================================================
 
 dnf5 install -y \
@@ -138,11 +138,16 @@ dnf5 install -y \
 
 
 # ============================================================
-# GAMING
+# GAMING PERFORMANCE
+#
+# IMPORTANT:
+# DO NOT install Fedora "gamescope".
+# Bazzite already contains "terra-gamescope".
+#
+# MangoHud and GameMode can be used normally.
 # ============================================================
 
 dnf5 install -y \
-    gamescope \
     mangohud \
     gamemode
 
@@ -228,7 +233,7 @@ echo "Latest Proton-CachyOS release: $PROTON_TAG"
 
 
 # ============================================================
-# FIND PROTON ARCHIVE
+# FIND X86_64 PROTON ARCHIVE
 # ============================================================
 
 PROTON_URL="$(
@@ -245,16 +250,19 @@ PROTON_URL="$(
 )"
 
 if [[ -z "$PROTON_URL" || "$PROTON_URL" == "null" ]]; then
+    echo
     echo "ERROR: Proton-CachyOS archive was not found."
     echo
-    echo "Available assets:"
+    echo "Available release assets:"
     printf '%s' "$PROTON_JSON" |
         jq -r '.assets[].name'
     exit 1
 fi
 
+echo
 echo "Proton archive:"
 echo "$PROTON_URL"
+echo
 
 
 # ============================================================
@@ -296,13 +304,33 @@ case "$PROTON_URL" in
         ;;
 
     *)
-        echo "ERROR: Unsupported Proton archive."
+        echo "ERROR: Unsupported Proton archive format."
         exit 1
         ;;
 
 esac
 
 rm -rf /tmp/proton-cachyos
+
+
+# ============================================================
+# VERIFY PROTON
+# ============================================================
+
+echo
+echo "============================================================"
+echo " Proton compatibility tools:"
+echo "============================================================"
+
+find /usr/share/steam/compatibilitytools.d \
+    -maxdepth 3 \
+    -type f \
+    \( \
+        -name "proton" \
+        -o \
+        -name "compatibilitytool.vdf" \
+    \) \
+    -print || true
 
 
 # ============================================================
@@ -314,16 +342,19 @@ cat > /etc/profile.d/gaming.sh <<'EOF'
 # Wine
 export WINEDEBUG="${WINEDEBUG:--all}"
 
-# Esync / Fsync
+# Esync
 export WINEESYNC="${WINEESYNC:-1}"
+
+# Fsync
 export WINEFSYNC="${WINEFSYNC:-1}"
 
 # DXVK
 export DXVK_LOG_LEVEL="${DXVK_LOG_LEVEL:-none}"
 
-# Shader cache
+# DXVK shader cache
 export DXVK_STATE_CACHE_PATH="${DXVK_STATE_CACHE_PATH:-$HOME/.cache/dxvk}"
 
+# VKD3D-Proton shader cache
 export VKD3D_SHADER_CACHE_PATH="${VKD3D_SHADER_CACHE_PATH:-$HOME/.cache/vkd3d-proton}"
 
 # Steam compatibility tools
@@ -384,7 +415,7 @@ rm -rf /tmp/*
 
 
 # ============================================================
-# COMPLETE
+# BUILD COMPLETE
 # ============================================================
 
 echo
@@ -392,7 +423,7 @@ echo "============================================================"
 echo " BAZZITE GAMING IMAGE BUILD COMPLETE"
 echo "============================================================"
 echo
-echo "Installed gaming components:"
+echo "Gaming stack:"
 echo
 echo "  Wine"
 echo "  Winetricks"
@@ -403,7 +434,7 @@ echo "  Mesa"
 echo "  Mesa 32-bit"
 echo "  X11"
 echo "  X11 32-bit"
-echo "  Gamescope"
+echo "  Bazzite Terra Gamescope"
 echo "  MangoHud"
 echo "  GameMode"
 echo "  PipeWire"
